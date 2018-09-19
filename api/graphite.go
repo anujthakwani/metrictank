@@ -27,7 +27,7 @@ import (
 	opentracing "github.com/opentracing/opentracing-go"
 	tags "github.com/opentracing/opentracing-go/ext"
 	"github.com/raintank/dur"
-	"github.com/raintank/worldping-api/pkg/log"
+	log "github.com/sirupsen/logrus"
 )
 
 var MissingOrgHeaderErr = errors.New("orgId not set in headers")
@@ -86,7 +86,7 @@ func (s *Server) findSeries(ctx context.Context, orgId uint32, patterns []string
 				Node:    r.peer,
 				Series:  nodes,
 			})
-			log.Debug("HTTP findSeries %d matches for %s found on %s", len(nodes), pattern, r.peer.GetName())
+			log.Debugf("HTTP findSeries %d matches for %s found on %s", len(nodes), pattern, r.peer.GetName())
 		}
 	}
 
@@ -119,14 +119,14 @@ func (s *Server) findSeriesLocal(ctx context.Context, orgId uint32, patterns []s
 			Node:    cluster.Manager.ThisNode(),
 			Series:  nodes,
 		})
-		log.Debug("HTTP findSeries %d matches for %s found locally", len(nodes), pattern)
+		log.Debugf("HTTP findSeries %d matches for %s found locally", len(nodes), pattern)
 	}
 	return result, nil
 }
 
 // findSeriesRemote calls findSeriesLocal on a peer via http rpc
 func (s *Server) findSeriesRemote(ctx context.Context, orgId uint32, patterns []string, seenAfter int64, peer cluster.Node) ([]Series, error) {
-	log.Debug("HTTP Render querying %s/index/find for %d:%q", peer.GetName(), orgId, patterns)
+	log.Debugf("HTTP Render querying %s/index/find for %d:%q", peer.GetName(), orgId, patterns)
 	data := models.IndexFind{
 		Patterns: patterns,
 		OrgId:    orgId,
@@ -134,7 +134,7 @@ func (s *Server) findSeriesRemote(ctx context.Context, orgId uint32, patterns []
 	}
 	buf, err := peer.Post(ctx, "findSeriesRemote", "/index/find", data)
 	if err != nil {
-		log.Error(4, "HTTP Render error querying %s/index/find: %q", peer.GetName(), err)
+		log.Errorf("HTTP Render error querying %s/index/find: %q", peer.GetName(), err.Error())
 		return nil, err
 	}
 	select {
@@ -146,7 +146,7 @@ func (s *Server) findSeriesRemote(ctx context.Context, orgId uint32, patterns []
 	resp := models.NewIndexFindResp()
 	_, err = resp.UnmarshalMsg(buf)
 	if err != nil {
-		log.Error(4, "HTTP Find() error unmarshaling body from %s/index/find: %q", peer.GetName(), err)
+		log.Errorf("HTTP Find() error unmarshaling body from %s/index/find: %q", peer.GetName(), err.Error())
 		return nil, err
 	}
 	result := make([]Series, 0)
@@ -156,7 +156,7 @@ func (s *Server) findSeriesRemote(ctx context.Context, orgId uint32, patterns []
 			Node:    peer,
 			Series:  nodes,
 		})
-		log.Debug("HTTP findSeries %d matches for %s found on %s", len(nodes), pattern, peer.GetName())
+		log.Debugf("HTTP findSeries %d matches for %s found on %s", len(nodes), pattern, peer.GetName())
 	}
 	return result, nil
 }
@@ -351,10 +351,10 @@ func (s *Server) listLocal(orgId uint32) []idx.Archive {
 }
 
 func (s *Server) listRemote(ctx context.Context, orgId uint32, peer cluster.Node) ([]idx.Archive, error) {
-	log.Debug("HTTP IndexJson() querying %s/index/list for %d", peer.GetName(), orgId)
+	log.Debugf("HTTP IndexJson() querying %s/index/list for %d", peer.GetName(), orgId)
 	buf, err := peer.Post(ctx, "listRemote", "/index/list", models.IndexList{OrgId: orgId})
 	if err != nil {
-		log.Error(4, "HTTP IndexJson() error querying %s/index/list: %q", peer.GetName(), err)
+		log.Errorf("HTTP IndexJson() error querying %s/index/list: %q", peer.GetName(), err.Error())
 		return nil, err
 	}
 	select {
@@ -368,7 +368,7 @@ func (s *Server) listRemote(ctx context.Context, orgId uint32, peer cluster.Node
 		var def idx.Archive
 		buf, err = def.UnmarshalMsg(buf)
 		if err != nil {
-			log.Error(3, "HTTP IndexJson() error unmarshaling body from %s/index/list: %q", peer.GetName(), err)
+			log.Errorf("HTTP IndexJson() error unmarshaling body from %s/index/list: %q", peer.GetName(), err.Error())
 			return nil, err
 		}
 		result = append(result, def)
@@ -535,7 +535,7 @@ func findTreejson(query string, nodes []idx.Node) models.SeriesTree {
 func (s *Server) metricsDelete(ctx *middleware.Context, req models.MetricsDelete) {
 	peers := cluster.Manager.MemberList()
 	peers = append(peers, cluster.Manager.ThisNode())
-	log.Debug("HTTP metricsDelete for %v across %d instances", req.Query, len(peers))
+	log.Debugf("HTTP metricsDelete for %v across %d instances", req.Query, len(peers))
 
 	reqCtx, cancel := context.WithCancel(ctx.Req.Context())
 	defer cancel()
@@ -546,7 +546,7 @@ func (s *Server) metricsDelete(ctx *middleware.Context, req models.MetricsDelete
 	}, len(peers))
 	var wg sync.WaitGroup
 	for _, peer := range peers {
-		log.Debug("HTTP metricsDelete getting results from %s", peer.GetName())
+		log.Debugf("HTTP metricsDelete getting results from %s", peer.GetName())
 		wg.Add(1)
 		if peer.IsLocal() {
 			go func() {
@@ -617,7 +617,7 @@ func (s *Server) metricsDeleteLocal(orgId uint32, query string) (int, error) {
 }
 
 func (s *Server) metricsDeleteRemote(ctx context.Context, orgId uint32, query string, peer cluster.Node) (int, error) {
-	log.Debug("HTTP metricDelete calling %s/index/delete for %d:%q", peer.GetName(), orgId, query)
+	log.Debugf("HTTP metricDelete calling %s/index/delete for %d:%q", peer.GetName(), orgId, query)
 
 	body := models.IndexDelete{
 		Query: query,
@@ -625,7 +625,7 @@ func (s *Server) metricsDeleteRemote(ctx context.Context, orgId uint32, query st
 	}
 	buf, err := peer.Post(ctx, "metricsDeleteRemote", "/index/delete", body)
 	if err != nil {
-		log.Error(4, "HTTP metricDelete error querying %s/index/delete: %q", peer.GetName(), err)
+		log.Errorf("HTTP metricDelete error querying %s/index/delete: %q", peer.GetName(), err.Error())
 		return 0, err
 	}
 
@@ -639,7 +639,7 @@ func (s *Server) metricsDeleteRemote(ctx context.Context, orgId uint32, query st
 	resp := models.MetricsDeleteResp{}
 	_, err = resp.UnmarshalMsg(buf)
 	if err != nil {
-		log.Error(4, "HTTP metricDelete error unmarshaling body from %s/index/delete: %q", peer.GetName(), err)
+		log.Errorf("HTTP metricDelete error unmarshaling body from %s/index/delete: %q", peer.GetName(), err.Error())
 		return 0, err
 	}
 
@@ -725,7 +725,7 @@ func (s *Server) executePlan(ctx context.Context, orgId uint32, plan expr.Plan) 
 	// note: if 1 series has a movingAvg that requires a long time range extension, it may push other reqs into another archive. can be optimized later
 	reqs, pointsFetch, pointsReturn, err := alignRequests(uint32(time.Now().Unix()), minFrom, maxTo, reqs)
 	if err != nil {
-		log.Error(3, "HTTP Render alignReq error: %s", err)
+		log.Errorf("HTTP Render alignReq error: %s", err.Error())
 		return nil, err
 	}
 	span := opentracing.SpanFromContext(ctx)
@@ -733,15 +733,15 @@ func (s *Server) executePlan(ctx context.Context, orgId uint32, plan expr.Plan) 
 	span.SetTag("points_fetch", pointsFetch)
 	span.SetTag("points_return", pointsReturn)
 
-	if LogLevel < 2 {
+	if LogLevel >= 5 {
 		for _, req := range reqs {
-			log.Debug("HTTP Render %s - arch:%d archI:%d outI:%d aggN: %d from %s", req, req.Archive, req.ArchInterval, req.OutInterval, req.AggNum, req.Node.GetName())
+			log.Debugf("HTTP Render %s - arch:%d archI:%d outI:%d aggN: %d from %s", req, req.Archive, req.ArchInterval, req.OutInterval, req.AggNum, req.Node.GetName())
 		}
 	}
 
 	out, err := s.getTargets(ctx, reqs)
 	if err != nil {
-		log.Error(3, "HTTP Render %s", err.Error())
+		log.Errorf("HTTP Render %s", err.Error())
 		return nil, err
 	}
 
